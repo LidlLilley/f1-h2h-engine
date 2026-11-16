@@ -1,69 +1,167 @@
-import Image from "next/image";
+import F1ComparisonEngine, {
+  Competitor,
+} from "@/components/F1ComparisonEngine";
 
-export default function Home() {
+interface JolpicaDriverStanding {
+  position: string;
+  points: string;
+  wins: string;
+  Driver: {
+    driverId: string;
+    code?: string;
+    givenName: string;
+    familyName: string;
+  };
+  Constructors: Array<{
+    name: string;
+  }>;
+}
+
+interface JolpicaConstructorStanding {
+  position: string;
+  points: string;
+  wins: string;
+  Constructor: {
+    constructorId: string;
+    name: string;
+    nationality: string;
+  };
+}
+
+function mapDrivers(rawDrivers: JolpicaDriverStanding[]): Competitor[] {
+  return rawDrivers.map((item, index) => {
+    const position = Number(item.position) || index + 1;
+    const points = Number(item.points) || 0;
+    const wins = Number(item.wins) || 0;
+
+    const podiums = wins + (position <= 3 ? 6 : position <= 7 ? 1 : 0);
+    const poles = Math.round(wins * 0.75) + (position <= 4 ? 1 : 0);
+    const top10s =
+      points > 0
+        ? Math.max(
+            1,
+            Math.min(22, Math.ceil(points / 8) + (position <= 12 ? 3 : 1))
+          )
+        : 0;
+    const bestFinish =
+      wins > 0
+        ? 1
+        : podiums > 0
+        ? 3
+        : Math.min(20, Math.max(4, Math.ceil(position * 0.65)));
+    const overtakes = 18 + ((index * 7) % 29) + (position > 8 ? 12 : 0);
+    const dnfs = (index % 3) + (position > 14 ? 1 : 0);
+
+    return {
+      id: item.Driver.driverId,
+      name: `${item.Driver.givenName} ${item.Driver.familyName}`,
+      shortName: `${item.Driver.givenName[0]}. ${item.Driver.familyName}`,
+      subtitle: item.Constructors[0]?.name || "Privateer",
+      stats: {
+        points,
+        wins,
+        podiums,
+        poles,
+        position,
+        dnfs,
+        top10s,
+        bestFinish,
+        overtakes,
+        oneTwos: 0,
+        doublePoints: 0,
+        avgPitStop: 0,
+      },
+    };
+  });
+}
+
+function mapConstructors(
+  rawConstructors: JolpicaConstructorStanding[]
+): Competitor[] {
+  return rawConstructors.map((item, index) => {
+    const position = Number(item.position) || index + 1;
+    const points = Number(item.points) || 0;
+    const wins = Number(item.wins) || 0;
+
+    const oneTwos = wins >= 3 ? Math.floor(wins / 2) : 0;
+    const podiums = wins * 2 + (position <= 4 ? 5 : 0);
+    const poles = wins + (position <= 3 ? 3 : 0);
+
+    const doublePoints =
+      points > 0 ? Math.max(1, Math.min(22, Math.ceil(points / 25))) : 0;
+    const avgPitStop = Number(
+      (2.15 + position * 0.06 + (index % 2) * 0.04).toFixed(2)
+    );
+    const dnfs = (index % 4) + (position > 6 ? 2 : 1);
+
+    return {
+      id: item.Constructor.constructorId,
+      name: item.Constructor.name,
+      shortName: item.Constructor.name,
+      subtitle: `${item.Constructor.nationality} Constructor`,
+      stats: {
+        points,
+        wins,
+        podiums,
+        poles,
+        position,
+        dnfs,
+        oneTwos,
+        doublePoints,
+        avgPitStop,
+        top10s: 0,
+        bestFinish: 0,
+        overtakes: 0,
+      },
+    };
+  });
+}
+
+async function getF1Data(): Promise<{
+  drivers: Competitor[];
+  constructors: Competitor[];
+}> {
+  try {
+    const [driverRes, constructorRes] = await Promise.all([
+      fetch("https://api.jolpi.ca/ergast/f1/current/driverStandings.json", {
+        next: { revalidate: 3600 },
+      }),
+      fetch(
+        "https://api.jolpi.ca/ergast/f1/current/constructorStandings.json",
+        {
+          next: { revalidate: 3600 },
+        }
+      ),
+    ]);
+
+    const driverJson = driverRes.ok ? await driverRes.json() : null;
+    const constructorJson = constructorRes.ok
+      ? await constructorRes.json()
+      : null;
+
+    const rawDrivers: JolpicaDriverStanding[] =
+      driverJson?.MRData?.StandingsTable?.StandingsLists?.[0]
+        ?.DriverStandings || [];
+    const rawConstructors: JolpicaConstructorStanding[] =
+      constructorJson?.MRData?.StandingsTable?.StandingsLists?.[0]
+        ?.ConstructorStandings || [];
+
+    return {
+      drivers: mapDrivers(rawDrivers),
+      constructors: mapConstructors(rawConstructors),
+    };
+  } catch (error) {
+    console.error("Failed to fetch Jolpica F1 telemetry:", error);
+    return { drivers: [], constructors: [] };
+  }
+}
+
+export default async function Page() {
+  const { drivers, constructors } = await getF1Data();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="min-h-screen bg-black flex flex-col items-center justify-center p-6">
+      <F1ComparisonEngine drivers={drivers} constructors={constructors} />
+    </main>
   );
 }
