@@ -134,13 +134,72 @@ function updateShapeColors(
 }
 
 /**
+ * Normalises After Effects PostScript font entries into valid CSS family,
+ * weight, and style definitions so mobile WebKit renders them properly.
+ */
+function normaliseMobileFonts(clonedJson: any) {
+  if (!Array.isArray(clonedJson?.fonts?.list)) return;
+
+  clonedJson.fonts.list = clonedJson.fonts.list.map((font: any) => {
+    const name = String(font.fName || "");
+
+    if (name.includes("Tomorrow")) {
+      return {
+        ...font,
+        fFamily: "Tomorrow",
+        fStyle: "italic",
+        fWeight: "700",
+        fOrigin: "n",
+        fPath: "",
+      };
+    }
+
+    if (name.includes("ExtraBold")) {
+      return {
+        ...font,
+        fFamily: "Oxanium",
+        fStyle: "normal",
+        fWeight: "800",
+        fOrigin: "n",
+        fPath: "",
+      };
+    }
+
+    if (name.includes("SemiBold")) {
+      return {
+        ...font,
+        fFamily: "Oxanium",
+        fStyle: "normal",
+        fWeight: "600",
+        fOrigin: "n",
+        fPath: "",
+      };
+    }
+
+    if (name.includes("Oxanium")) {
+      return {
+        ...font,
+        fFamily: "Oxanium",
+        fStyle: "normal",
+        fWeight: "400",
+        fOrigin: "n",
+        fPath: "",
+      };
+    }
+
+    return font;
+  });
+}
+
+/**
  * Clones the Bodymovin JSON and dynamically overwrites:
- * 1. Title & Subtitle ('Text_Broadcast_Title', 'Text_Broadcast_Subtitle')
- * 2. Competitor Names ('Text_Name_1', 'Text_Name_2')
- * 3. Stat Labels ('Text_Stat_1', 'Text_Stat_2', 'Text_Stat_3')
- * 4. Stat Values ('Text_Value_1' through 'Text_Value_6')
- * 5. Animator 2 Fill Color ('fc') on all text layers
- * 6. Fill Color inside 'Shape_Transition_1'
+ * 1. Mobile WebKit Font Definitions ('fonts.list')
+ * 2. Title & Subtitle ('Text_Broadcast_Title', 'Text_Broadcast_Subtitle')
+ * 3. Competitor Names ('Text_Name_1', 'Text_Name_2')
+ * 4. Stat Labels ('Text_Stat_1', 'Text_Stat_2', 'Text_Stat_3')
+ * 5. Stat Values ('Text_Value_1' through 'Text_Value_6')
+ * 6. Animator 2 Fill Color ('fc') on all text layers
+ * 7. Fill Color inside 'Shape_Transition_1'
  */
 function injectBroadcastData(
   rawLottieJson: any,
@@ -151,6 +210,9 @@ function injectBroadcastData(
 
   const clonedJson = JSON.parse(JSON.stringify(rawLottieJson));
   const lottieRgb = hexToLottieRgb(hexColor);
+
+  // Fix mobile font metadata before rendering layers
+  normaliseMobileFonts(clonedJson);
 
   const updateLayerList = (layers: any[]) => {
     if (!Array.isArray(layers)) return;
@@ -249,17 +311,45 @@ export default function F1ComparisonEngine({
   const competitorB =
     activeRoster.find((c) => c.id === competitorBId) || activeRoster[1];
 
-  // Fetch the exported AE JSON from /public/f1-header.json
+  // Fetch the exported AE JSON from /public/f1-header.json AND wait for mobile fonts
   useEffect(() => {
-    fetch("/f1-header.json")
-      .then((res) => {
+    let isMounted = true;
+
+    async function initLottieAndFonts() {
+      try {
+        const fontPromise =
+          typeof document !== "undefined" && "fonts" in document
+            ? Promise.all([
+                document.fonts.load("italic 700 48px 'Tomorrow'"),
+                document.fonts.load("400 24px 'Oxanium'"),
+                document.fonts.load("600 28px 'Oxanium'"),
+                document.fonts.load("800 36px 'Oxanium'"),
+              ]).then(() => document.fonts.ready)
+            : Promise.resolve();
+
+        const [res] = await Promise.all([
+          fetch("/f1-header.json"),
+          fontPromise,
+        ]);
+
         if (!res.ok) throw new Error("Lottie JSON not in /public yet");
-        return res.json();
-      })
-      .then((data) => setRawLottieData(data))
-      .catch(() => {
-        setRawLottieData(null);
-      });
+        const data = await res.json();
+
+        if (isMounted) {
+          setRawLottieData(data);
+        }
+      } catch {
+        if (isMounted) {
+          setRawLottieData(null);
+        }
+      }
+    }
+
+    initLottieAndFonts();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // --- 3. CATEGORY SWITCH HANDLER ---
@@ -415,7 +505,26 @@ export default function F1ComparisonEngine({
   const lottieReplayKey = `${accentHex}-${subtitleText}-${titleText}-${competitorA.id}-${competitorB.id}-${selectedStats.join("-")}`;
 
   return (
-    <div className="w-full max-w-md bg-zinc-950 text-white rounded-2xl border border-zinc-800/80 overflow-hidden shadow-2xl">
+    <div className="w-full max-w-md bg-zinc-950 text-white rounded-2xl border border-zinc-800/80 overflow-hidden shadow-2xl relative">
+      {/* Hidden Mobile WebKit Font Preloader */}
+      <div
+        aria-hidden="true"
+        className="absolute -top-[9999px] -left-[9999px] w-px h-px opacity-[0.01] pointer-events-none overflow-hidden select-none"
+      >
+        <span style={{ fontFamily: "'Tomorrow', sans-serif", fontWeight: 700, fontStyle: "italic" }}>
+          TALE OF THE TAPE
+        </span>
+        <span style={{ fontFamily: "'Oxanium', sans-serif", fontWeight: 400 }}>
+          ROUND 12
+        </span>
+        <span style={{ fontFamily: "'Oxanium', sans-serif", fontWeight: 600 }}>
+          VERSTAPPEN
+        </span>
+        <span style={{ fontFamily: "'Oxanium', sans-serif", fontWeight: 800 }}>
+          0123456789
+        </span>
+      </div>
+
       {/* --- MEDIA HEADER: AFTER EFFECTS LOTTIE + LIVE GRAPHICS CONTROLS --- */}
       <div className="bg-zinc-900/50 border-b border-zinc-800/80 p-4">
         {/* User Accent Colour Bar */}
